@@ -1,6 +1,3 @@
-Certainly, let's restructure the script to achieve your requirements:
-
-```python
 import getpass
 import requests
 import urllib3
@@ -14,100 +11,93 @@ tower_url = 'https://your-ansible-tower-url/'
 username = input('Enter your Ansible Tower username: ')
 password = getpass.getpass('Enter your Ansible Tower password: ')
 
-# Function to fetch job templates and their details
-def fetch_job_templates():
+# Function to fetch job templates with pagination
+def fetch_job_templates_with_pagination():
     try:
         # Create a session with authentication
         session = requests.Session()
         session.auth = (username, password)
 
-        # Initialize a list to store job template details
-        job_templates_data = []
+        # Initialize pagination variables
+        page = 1
+        page_size = 100  # Adjust the page size as needed
+        job_templates = []
 
-        # Fetch all job templates
-        job_templates_url = f'{tower_url}/api/v2/job_templates/'
-        while job_templates_url:
+        while True:
+            # Fetch job templates with pagination
+            job_templates_url = f'{tower_url}/api/v2/job_templates/?page={page}&page_size={page_size}'
             response = session.get(job_templates_url, verify=False)
+
             if response.status_code != 200:
                 raise Exception(f"Failed to fetch job templates. Status code: {response.status_code}")
-            
-            job_templates = response.json()['results']
 
-            for template in job_templates:
-                job_templates_data.append({
-                    'Template Name': template['name'],
-                    'Template ID': template['id'],
-                    'Playbook Name': template['job_type'],
-                    'Project Number': template.get('project', {}).get('id')
-                })
+            templates_data = response.json()['results']
 
-            job_templates_url = response.json().get('next')
+            if not templates_data:
+                break
 
-        return job_templates_data
+            job_templates.extend(templates_data)
+            page += 1
+
+        return job_templates
     except Exception as e:
         print(f"Error: {str(e)}")
         return []
 
-# Function to fetch project names by project numbers
-def fetch_project_names(job_templates_data):
+# Function to fetch project names based on project numbers
+def fetch_project_names(project_numbers):
     try:
         # Create a session with authentication
         session = requests.Session()
         session.auth = (username, password)
 
-        # Create a dictionary to store project names by project numbers
         project_names = {}
 
-        # Extract unique project numbers
-        project_numbers = set(template['Project Number'] for template in job_templates_data if template['Project Number'])
-
-        # Fetch project details for each project number
         for project_number in project_numbers:
+            # Fetch project details by project number
             project_url = f'{tower_url}/api/v2/projects/{project_number}/'
             response = session.get(project_url, verify=False)
-            if response.status_code != 200:
-                raise Exception(f"Failed to fetch project details. Status code: {response.status_code}")
 
-            project_data = response.json()
-            project_names[project_number] = project_data.get('name', 'N/A')
+            if response.status_code == 200:
+                project_data = response.json()
+                project_name = project_data.get('name', 'N/A')
+                project_names[project_number] = project_name
 
         return project_names
     except Exception as e:
         print(f"Error: {str(e)}")
         return {}
 
-# Function to create and export data to a CSV file
-def export_to_csv(job_templates_data, project_names):
+# Function to export data to CSV
+def export_to_csv(job_templates, project_names):
     try:
         # Create a CSV file and write header
-        with open('ansible_job_templates.csv', 'w', newline='') as csvfile:
+        with open('ansible_template_project.csv', 'w', newline='') as csvfile:
             fieldnames = ['Project Name', 'Project ID', 'Template Name', 'Template ID', 'Playbook Name']
             writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
             writer.writeheader()
 
-            # Write data to the CSV
-            for template in job_templates_data:
-                project_name = project_names.get(template['Project Number'], 'N/A')
+            # Write job template data to the CSV
+            for template in job_templates:
+                template_id = template['id']
+                project_id = template['project']
+                template_name = template['name']
+                playbook_name = template['job_type']
+
+                # Get the project name from project_names dictionary
+                project_name = project_names.get(project_id, 'N/A')
+
                 writer.writerow({
                     'Project Name': project_name,
-                    'Project ID': template['Project Number'],
-                    'Template Name': template['Template Name'],
-                    'Template ID': template['Template ID'],
-                    'Playbook Name': template['Playbook Name']
+                    'Project ID': project_id,
+                    'Template Name': template_name,
+                    'Template ID': template_id,
+                    'Playbook Name': playbook_name
                 })
 
-        print("CSV file 'ansible_job_templates.csv' has been generated.")
+        print("CSV file 'ansible_template_project.csv' has been generated.")
     except Exception as e:
         print(f"Error: {str(e)}")
 
 if __name__ == "__main__":
-    job_templates_data = fetch_job_templates()
-    if not job_templates_data:
-        print("No job templates found.")
-        exit(1)
-
-    project_names = fetch_project_names(job_templates_data)
-    export_to_csv(job_templates_data, project_names)
-```
-
-This script first fetches all job templates with their details, including project numbers. Then, it extracts unique project numbers and fetches project names for each project number. Finally, it creates a CSV file that includes the project name, project ID, template name, template ID, and playbook name.
+    job_templates = fetch_job_templates_with_pagination()
